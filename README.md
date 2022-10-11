@@ -1,2 +1,2 @@
-# electromagnetic-induced-transparency
+# Electromagnetic-Induced-Transparency
 Some simulation with dark state &amp; spectrum
