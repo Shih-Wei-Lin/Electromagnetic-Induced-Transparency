@@ -10,11 +10,9 @@ if 'labber' in _pkg_installed:
     import Labber
 else:
     try:
-        # import from the parent directory
         from .LabberAPI import Labber
     except ImportError:
         parent_dir = '../'
-        # import from the parent directory
         if parent_dir not in sys.path:
             sys.path.append(parent_dir)
             from LabberAPI import Labber
@@ -33,48 +31,49 @@ def get_path(title: str = 'Select processing files'):
     return paths
 
 
-def switch_type(type,zdata):
+def switch_type(type, zdata):
     def unwrap_phase(z):
         return np.unwrap(np.angle(z))
+
     def origin(z):
         return z
+
     typedict = {
         'Magnitude': abs,
         'Real': np.real,
         'Imag': np.imag,
         'Phase': np.angle,
         '~Phase': unwrap_phase,
-        'Complex':origin,
+        'Complex': origin,
     }
     return typedict.get(type, abs)(zdata)
 
 
-def isConcatenatedLogs(fpath: str):
+def is_concatenated_logs(fpath: str):
     with h5py.File(fpath, 'r') as f:
-        # get all dirnames in the current directory
         f_dirnames = list(f.keys())
         return True if 'Log_2' in f_dirnames else False
 
 
-def getLogChName(logObj, idx: int):
+def get_log_channel_name(logObj, idx: int):
     return logObj.getLogChannels()[idx]['name']
 
 
-def getInstrName(logObj):
-    instrNameTagDict = {
+def get_instr_name(logObj):
+    instr_name_tag_dict = {
         "Digitizer": ["Channel A", "Channel B"],
         "SA": ["Signal"],
         "VNA": [f'S{i}{j}' for i in range(1, 5) for j in range(1, 5)]
     }
-    instrTag = getLogChName(logObj, -1).split(' - ')[1]
-    instrName = 'Undentify'
-    for nameTarget, tagList in instrNameTagDict.items():
-        if instrTag in tagList:
-            instrName = nameTarget
-    return instrName
+    instr_tag = get_log_channel_name(logObj, -1).split(' - ')[1]
+    instr_name = 'Undefined'
+    for name_target, tag_list in instr_name_tag_dict.items():
+        if instr_tag in tag_list:
+            instr_name = name_target
+    return instr_name
 
 
-def get_data(logObj, path, instrName):
+def get_data(logObj, path, instr_name):
     logchannel = logObj.getLogChannels()[0]
     channel1 = logObj.getStepChannels()[0]
     channel2 = logObj.getStepChannels()[1]
@@ -91,32 +90,32 @@ def get_data(logObj, path, instrName):
         'dim': 1 if np.shape(logObj.getData())[0] == 1 else 2
     }
 
-    loginfo['instrument'] = instrName
+    loginfo['instrument'] = instr_name
 
-    if instrName == 'VNA':
+    if instr_name == 'VNA':
         loginfo.update(
             x_name='Frequency', x_unit='Hz',
             y=channel1['values'], y_name=channel1['name'], y_unit=channel1['unit']
         )
-
-    elif instrName == 'Digitizer':
+    elif instr_name == 'Digitizer':
         loginfo.update(x_name=channel1['name'], x_unit=channel1['unit'])
         if loginfo['dim'] != 1:
             loginfo.update(
-                y=channel2['values'], y_name=channel2['name'], y_unit=channel2['unit'])
+                y=channel2['values'], y_name=channel2['name'], y_unit=channel2['unit']
+            )
 
     if len(loginfo['y']) != np.shape(loginfo['z'])[0]:
-        raise ValueError('y axis dimsion is wrong')
+        raise ValueError('y axis dimension is wrong')
 
     return loginfo
 
 
-def parseConcatenatedHDF5(logObj, instrName='VNA'):
-    def getFreqInfo(info):
-        center = f'{instrName} - Center frequency'
-        span = f'{instrName} - Span'
-        start = f'{instrName} - Start frequency'
-        stop = f'{instrName} - Stop frequency'
+def parse_concatenated_hdf5(logObj, instr_name='VNA'):
+    def get_freq_info(info):
+        center = f'{instr_name} - Center frequency'
+        span = f'{instr_name} - Span'
+        start = f'{instr_name} - Start frequency'
+        stop = f'{instr_name} - Stop frequency'
 
         if center in info.keys():
             f_start = info[center] - info[span] / 2
@@ -127,60 +126,54 @@ def parseConcatenatedHDF5(logObj, instrName='VNA'):
 
         return f_start, f_stop
 
-    logChName = getLogChName(logObj, 0)
+    log_ch_name = get_log_channel_name(logObj, 0)
 
     data = {
         'entries': logObj.getNumberOfEntries(),
         'x': None, 'x_name': 'Frequency', 'x_unit': 'Hz',
-        'z': None, 'z_name': logChName, 'z_unit': '',
+        'z': None, 'z_name': log_ch_name, 'z_unit': '',
         'y': [], 'y_name': '', 'y_unit': '',
     }
 
-    entryInfo = logObj.getEntry(entry=0)
+    entry_info = logObj.getEntry(entry=0)
 
-    # x
-    f_start, f_stop = getFreqInfo(entryInfo)
+    f_start, f_stop = get_freq_info(entry_info)
     for i in range(data['entries']):
-        f_min, f_max = getFreqInfo(logObj.getEntry(entry=i))
+        f_min, f_max = get_freq_info(logObj.getEntry(entry=i))
         if f_min < f_start:
             f_start = f_min
         if f_max > f_stop:
             f_stop = f_max
-    f_delta = entryInfo[logChName]['dt']
-    f_totPts = int((f_stop - f_start) / f_delta)
-    data['x'] = np.linspace(start=f_start, stop=f_stop, num=f_totPts+1)
+    f_delta = entry_info[log_ch_name]['dt']
+    f_tot_pts = int((f_stop - f_start) / f_delta)
+    data['x'] = np.linspace(start=f_start, stop=f_stop, num=f_tot_pts + 1)
 
-    # y
     ydict = logObj.getStepChannels()[-1]
     data['y_name'], data['y_unit'] = ydict['name'], ydict['unit']
     ylist = [(i, logObj.getEntry(entry=i)[data['y_name']])
-              for i in range(data['entries'])]
+             for i in range(data['entries'])]
     ylist.sort(key=lambda s: s[1])
 
-    # z
     data['z'] = np.full(
         (data['entries'], int(len(data['x']))), np.nan, np.cfloat)
 
-    # update processing
     for i, flux in enumerate(ylist):
         idx = flux[0]
-        entryInfo = logObj.getEntry(entry=idx)
-        # z: replace nan trace with measured data
-        start_freq, stop_freq = getFreqInfo(entryInfo)
+        entry_info = logObj.getEntry(entry=idx)
+        start_freq, stop_freq = get_freq_info(entry_info)
         start_idx, = np.where(data['x'] == start_freq)
         stop_idx, = np.where(data['x'] == stop_freq)
-        data['z'][i][start_idx[0]:stop_idx[0]+1] = entryInfo[
-            getLogChName(logObj, 0)]['y']
+        data['z'][i][start_idx[0]:stop_idx[0] + 1] = entry_info[
+            get_log_channel_name(logObj, 0)]['y']
 
-        # y: insert the current value to data['y']
-        data['y'].append(entryInfo[data['y_name']])
+        data['y'].append(entry_info[data['y_name']])
 
     data['y'] = np.array(data['y'])
 
     return data
 
 
-def get_Tag(logObj) -> dict:
+def get_tag(logObj) -> dict:
     info_dict = {}
     project = logObj.getProject().split('/')
     sample, projectname = '', ''
@@ -193,44 +186,47 @@ def get_Tag(logObj) -> dict:
     info_dict["tag"] = logObj.getTags()
     return info_dict
 
-def plot_1D(xdata,ydata,zdata,xname,yname,zname):
+
+def plot_1D(xdata, ydata, zdata, xname, yname, zname):
     fig_1D = dict(
-        layout = go.Layout(
-        xaxis=dict(title = xname, showspikes = True, spikemode = 'across', tickformat = '.2e'),
-        yaxis=dict(title = zname, showspikes = True, spikemode = 'across', tickformat = '.2e')),
+        layout=go.Layout(
+            xaxis=dict(title=xname, showspikes=True,
+                       spikemode='across', tickformat='.2e'),
+            yaxis=dict(title=zname, showspikes=True, spikemode='across', tickformat='.2e')),
     )
     if np.shape(xdata) == np.shape(zdata):
         fig_1D["data"] = [go.Scatter(
-            x = xdata, y = zdata,
-            name = f'{yname} = {ydata}', mode='lines+markers')]
+            x=xdata, y=zdata,
+            name=f'{yname} = {ydata}', mode='lines+markers')]
     else:
         fig_1D["data"] = [go.Scatter(
-            x = xdata, y = data,
-            name = f'{yname} ={ydata[i]}', mode='lines+markers') for i,data in enumerate(zdata)]
-    
+            x=xdata, y=data,
+            name=f'{yname} ={ydata[i]}', mode='lines+markers') for i, data in enumerate(zdata)]
+
     fig = go.Figure(fig_1D)
     fig.show()
 
-def plot(xdata,ydata,zdata,xname,yname,zname):
+
+def plot(xdata, ydata, zdata, xname, yname, zname):
     fig = go.Figure(
-        layout = go.Layout(
+        layout=go.Layout(
             xaxis=dict(
-                title = xname, showspikes = True,
-                spikemode = 'across', tickformat = '.2e'),
+                title=xname, showspikes=True,
+                spikemode='across', tickformat='.2e'),
             yaxis=dict(
-                title = yname, showspikes = True,
-                spikemode = 'across', tickformat = '.2e')),
+                title=yname, showspikes=True,
+                spikemode='across', tickformat='.2e')),
     )
     if np.shape(xdata) == np.shape(zdata):
         fig.add_trace(go.Scatter(
-            visible=False, x = xdata, y = zdata, name = f'{yname} = {ydata:.2f}'))
+            visible=False, x=xdata, y=zdata, name=f'{yname} = {ydata:.2f}'))
     else:
-        for i,data in enumerate(zdata):
+        for i, data in enumerate(zdata):
             fig.add_trace(go.Scatter(
-                visible=False, x = xdata, y = data, name = f'{yname} = {ydata[i]:.2f}'))
+                visible=False, x=xdata, y=data, name=f'{yname} = {ydata[i]:.2f}'))
     fig.add_trace(
         go.Heatmap(
-            colorbar = dict(title = zname, tickformat = '.2e'),
+            colorbar=dict(title=zname, tickformat='.2e'),
             colorscale='Viridis', reversescale=True,
             x=xdata, y=ydata, z=zdata)
     )
@@ -239,42 +235,40 @@ def plot(xdata,ydata,zdata,xname,yname,zname):
     for i in range(len(ydata)):
         step = dict(
             method="update",
-            args=[{"visible": ([False] * (len(ydata)+1))}],  # layout attribute
-            label = f"{ydata[i]:.2e}"
+            args=[{"visible": ([False] * (len(ydata) + 1))}],
+            label=f"{ydata[i]:.2e}"
         )
-        step["args"][0]["visible"][i] = True  # Toggle i'th trace to "visible"
+        step["args"][0]["visible"][i] = True
         steps.append(step)
 
     sliders = [dict(
         active=0, pad={"t": 50}, steps=steps,
         currentvalue={"prefix": f"{yname}: "})]
 
-
     fig.update_layout(
-        updatemenus = [
+        updatemenus=[
             dict(
-                type = 'buttons',
-                direction = 'up',
-                buttons = [
+                type='buttons',
+                direction='up',
+                buttons=[
                     dict(
-                        method = "update", label = "2D Plot",
-                        args = [
-                            {"type":"heatmap", "visible":[False]*len(ydata)+[True]},
-                            {"yaxis":dict(title = yname, tickformat = '.2e')}]),
+                        method="update", label="2D Plot",
+                        args=[
+                            {"type": "heatmap", "visible": [False] * len(ydata) + [True]},
+                            {"yaxis": dict(title=yname, tickformat='.2e')}]),
                     dict(
-                        method = "update", label = "1D Plot(All)",
-                        args = [
-                            {"type": "scatter", "mode": "lines", "visible":[True]*len(ydata)+[False]},
-                            {"yaxis":dict(title = zname, tickformat = '.2e')}]),
+                        method="update", label="1D Plot(All)",
+                        args=[
+                            {"type": "scatter", "mode": "lines", "visible": [True] * len(ydata) + [False]},
+                            {"yaxis": dict(title=zname, tickformat='.2e')}]),
                     dict(
-                        method = "update", label = "1D Plot",
-                        args = [
-                            {"type": "scatter", "mode": 'lines+markers', "visible":[True]+[False]*len(ydata)},
-                            {"yaxis":dict(title = zname, tickformat = '.2e'), "sliders": sliders}])
+                        method="update", label="1D Plot",
+                        args=[
+                            {"type": "scatter", "mode": 'lines+markers', "visible": [True] + [False] * len(ydata)},
+                            {"yaxis": dict(title=zname, tickformat='.2e'), "sliders": sliders}])
                 ])
         ])
     fig.show()
-
 
 
 class LogHandler:
@@ -315,37 +309,37 @@ class LogHandler:
         (see output help for detail)
         output
         plot
-    """    
-    def __init__(self, file=None):
-        self.path = file if file != None else get_path()
-        self.log = Labber.LogFile(self.path)
-        self.instrName = getInstrName(self.log)
-        if isConcatenatedLogs(self.path) and self.instrName == 'VNA':
-            self.loginfo = parseConcatenatedHDF5(self.log, self.instrName)
-        else:
-            self.loginfo = get_data(self.log, self.path, self.instrName)
-        self.loginfo.update(get_Tag(self.log))
+    """
 
-    def output(self, Data_type: str = 'Magnitude', Entry = None, avg = False):
+    def __init__(self, file=None):
+        self.path = file if file is not None else get_path()
+        self.log = Labber.LogFile(self.path)
+        self.instr_name = get_instr_name(self.log)
+        if is_concatenated_logs(self.path) and self.instr_name == 'VNA':
+            self.loginfo = parse_concatenated_hdf5(self.log, self.instr_name)
+        else:
+            self.loginfo = get_data(self.log, self.path, self.instr_name)
+        self.loginfo.update(get_tag(self.log))
+
+    def output(self, data_type: str = 'Magnitude', entry=None, avg=False):
         """
-        output data
+        Output data
 
         Parameters
         ----------
-        Data_type : str
+        data_type : str
             z data type:
                 'Magnitude': Magnitude
                 'Real': Real part
                 'Imag': Imaginary part
                 'Phase': Phase
-                '~Phase': Unwarp Phase
+                '~Phase': Unwrap Phase
                 'Complex': Complex
-        Entry : int, tuple, list, None
+        entry : int, tuple, list, None
             int: output the specific entry
-            tuple: (start,stop) output a range of entry
+            tuple: (start, stop) output a range of entry
             list: output the selected entry
             None: output whole data
-
         avg : bool, optional
             average all the selected data
 
@@ -354,12 +348,10 @@ class LogHandler:
         x: np.ndarray = x data
         y: np.ndarray = y data
         z: np.ndarray = z data
-
         xname: str = x axis name with units
         yname: str = y axis name with units
         zname: str = z axis name with units
-
-        """        
+        """
 
         xname = f'{self.loginfo["x_name"]} [{self.loginfo["x_unit"]}]'
         yname = f'{self.loginfo["y_name"]} [{self.loginfo["y_unit"]}]'
@@ -367,48 +359,45 @@ class LogHandler:
         x = self.loginfo['x']
         y = self.loginfo['y']
         z = self.loginfo['z']
-        
-        if Entry != None:
-            if isinstance(Entry, int):
-                y = np.array(y[Entry])
-                z = np.array(z[Entry])
-            elif isinstance(Entry,tuple):
-                y = y[Entry[0]-1: Entry[1]]
-                z = z[Entry[0]-1: Entry[1]] #
-            elif isinstance(Entry, (list, np.ndarray)):
-                newlist = np.sort(np.array(Entry)-1)
+
+        if entry is not None:
+            if isinstance(entry, int):
+                y = np.array(y[entry])
+                z = np.array(z[entry])
+            elif isinstance(entry, tuple):
+                y = y[entry[0] - 1: entry[1]]
+                z = z[entry[0] - 1: entry[1]]
+            elif isinstance(entry, (list, np.ndarray)):
+                newlist = np.sort(np.array(entry) - 1)
                 y = np.array([y[i] for i in newlist])
                 z = np.array([z[i] for i in newlist])
-        z = switch_type(Data_type, z)
+        z = switch_type(data_type, z)
         if avg:
-            z = np.sum(z,0)/len(y)
-        return x ,y , z, xname, yname, zname
+            z = np.sum(z, 0) / len(y)
+        return x, y, z, xname, yname, zname
 
-    def plot(self, Data_type='Magnitude', Entry=None, avg = False):
+    def plot(self, data_type='Magnitude', entry=None, avg=False):
         """
-        plot 
+        Plot data
 
         Parameters
         ----------
-        Data_type : str, optional
-        Entry : int, tuple, list, None
+        data_type : str, optional
+        entry : int, tuple, list, None
         avg : bool
 
         Returns
         -------
         plot
-        """        
-        arg = self.output(Data_type, Entry, avg)
-        if len(self.loginfo['y']) == 1 or isinstance(Entry,int):
+        """
+        arg = self.output(data_type, entry, avg)
+        if len(self.loginfo['y']) == 1 or isinstance(entry, int):
             plot_1D(*arg)
         else:
             plot(*arg)
 
 
-
-
 if __name__ == '__main__':
     path = get_path()
     testlog = LogHandler(path)
-    data = testlog.loginfo
     testlog.plot()
