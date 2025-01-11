@@ -1,3 +1,3 @@
 # Electromagnetic-Induced-Transparency
-- Some simulation with dark state &amp;
-- spectrum base on fluxonium & Transmon
+- Some simulation with dark state  base on Transmon with cavity
+- spectrum base on fluxonium in waveguide
